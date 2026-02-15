@@ -166,9 +166,9 @@ def main():
 
             if publisher and docker_domains.updated():
                 update_list = docker_domains.update_list()
-                for cname in update_list:
+                for cname, service in update_list:
                     try:
-                        status = publisher.publish_cname(cname, force)
+                        status = publisher.publish_cname(cname, service, force)
                         if not status:
                             logging.error("Failed to publish '%s'", cname)
                             continue

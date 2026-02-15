@@ -7,7 +7,7 @@ import time
 class DockerDomains(object):
     """Parse Docker labels to select Domain names to publish"""
 
-    def __init__(self, enable):
+    def __init__(self, enable, **entrypoints):
         """Initialize the Parser"""
 
         try:
@@ -20,6 +20,8 @@ class DockerDomains(object):
 
         self.enable = enable
         self.domains = {}
+        self.entrypoints = dict(entrypoints)
+        self.services = {}
 
         # Cache compiled regular expressions for better performance
         # Traefik v2/v3 format: traefik.http.routers.*.rule or traefik.https.routers.*.rule
@@ -64,6 +66,7 @@ class DockerDomains(object):
         """Parse Docker container labels to extract domain names."""
 
         cnames = {}
+        services = {}
 
         try:
             containers = self.docker.containers.list()
@@ -95,6 +98,16 @@ class DockerDomains(object):
                                     domain_name = domain_match.group(1)
                                     if self._is_valid_domain(domain_name):
                                         cnames[domain_name] = True
+                                        ep_key = rule_key.replace(".rule", ".entrypoints")
+                                        ep_value = labels.get(ep_key, "")
+                                        if ep_value is not None and ep_value != "":
+                                            eps = ep_key.split(',')
+                                            for ep in eps:
+                                                if ep in self.entrypoints:
+                                                    service_rules = services.get(domain_name, [])
+                                                    svc_type, svc_port = self.entrypoints[ep]
+                                                    service_rules.append((svc_type, svc_port, cname, ["path=/"]))
+                                                    services[domain_name] = service_rules
                                     else:
                                         logging.warning("Invalid domain name extracted (v2/v3): %s", domain_name)
 
@@ -125,6 +138,8 @@ class DockerDomains(object):
             except Exception as e:
                 logging.error("Error processing container %s: %s", getattr(container, 'name', 'unknown'), e)
                 continue
+
+        self.services.update(**services)
 
         # Add new domains
         for domain_name in cnames.keys():
@@ -179,7 +194,15 @@ class DockerDomains(object):
         list = []
         for key,value in self.domains.items():
             if not value[1] and value[0] != "Supp":
-                list.append(key)
+                if key in self.services:
+                    services = self.services[key]
+                    if services is None or len(services) == 0:
+                        list.append((key, None))
+                    else:
+                        for service in services:
+                            list.append(key, services)
+                else: 
+                    list.append((key, None))
         return list
 
     def updated(self):

@@ -114,7 +114,7 @@ class AvahiPublisher(object):
             return None
 
 
-    def publish_cname(self, cname, force=False):
+    def publish_cname(self, cname, service=None, force=False):
         """Publish a CNAME record."""
 
         # Validate input parameters
@@ -158,6 +158,11 @@ class AvahiPublisher(object):
             self.published[cname] = group
 
             logging.debug("Successfully published CNAME '%s'", cname)
+
+            if service is not None:
+                for service_entry in service:
+                    self.__anounce_service(cname, service)
+
             return True
 
         except dbus.exceptions.DBusException as e:
@@ -166,6 +171,25 @@ class AvahiPublisher(object):
         except Exception as e:
             logging.error("Unexpected error publishing CNAME '%s': %s", cname, e)
             return False
+
+    def __anounce_service(self, cname, service):
+        service_type, service_port, service_name, txt_records = service
+
+        server = dbus.Interface(self.bus.get_object(avahi.DBUS_NAME, avahi.DBUS_PATH_SERVER), avahi.DBUS_INTERFACE_SERVER)
+        group = dbus.Interface(self.bus.get_object(avahi.DBUS_NAME, server.EntryGroupNew()), avahi.DBUS_INTERFACE_ENTRY_GROUP)
+        group.AddService(
+            avahi.IF_MULTI,
+            avahi.PROTOCOL_UNSPEC,
+            dbus.UInt32(0),
+            service_name.encode("ascii"),
+            service_type.encode("ascii"),
+            cname.split('.')[-1].encode("ascii"),
+            cname.encode("ascii"),
+            service_port,
+            [t.encode("ascii") for t in txt_records] if txt_records is not None else None,
+        )
+        group.Commit()
+        self.published[f"service_{cname}"] = group
 
     def unpublish(self, name):
         """Remove a published record from mDNS."""
